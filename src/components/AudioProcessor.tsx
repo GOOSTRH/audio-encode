@@ -137,76 +137,35 @@ export const AudioProcessor = () => {
     }
   };
 
-  const encodeToBase64 = (blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          // Remove the data URL prefix
-          const base64 = reader.result.split(',')[1];
-          resolve(base64);
-        } else {
-          reject(new Error('Failed to convert to Base64'));
-        }
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  };
-
-  const decodeFromBase64 = (base64: string): Blob => {
-    const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: 'audio/wav' });
-  };
-
-  const generateEncodingCode = async (audioBlob: Blob): Promise<string> => {
+  const generateEncodingCode = (): string => {
     const typePrefix = encodingType === 'split' ? 's' : encodingType === 'oddEven' ? 'oe' : '';
     if (!typePrefix) return '';
     
     const partsCode = encodingType === 'split' ? `b${numberOfParts}` : 'b';
     const intervalCode = `b${interval}`;
     const reverseCode = isReversed ? 't' : 'f';
-    const settingsCode = `${typePrefix}${partsCode}${intervalCode}${reverseCode}`;
     
-    // Convert audio to Base64
-    const audioBase64 = await encodeToBase64(audioBlob);
-    
-    // Combine settings and audio data
-    const fullCode = JSON.stringify({
-      settings: settingsCode,
-      audio: audioBase64
-    });
-    
-    // Convert to Base64 to make it more compact
-    return btoa(fullCode);
+    return `${typePrefix}${partsCode}${intervalCode}${reverseCode}`;
   };
 
   const parseEncodingCode = (code: string): boolean => {
     try {
-      // Decode Base64
-      const jsonStr = atob(code);
-      const data = JSON.parse(jsonStr);
-      
-      if (!data.settings || !data.audio) return false;
-      
-      // Parse settings code
-      const parts = data.settings.split('b');
+      // Split by 'b' to get parts: [type, parts, interval, reverse]
+      const parts = code.split('b');
       if (parts.length !== 3) return false;
 
       const [type, partsStr, intervalWithReverse] = parts;
       if (!type || !intervalWithReverse) return false;
 
+      // Parse reverse flag (last character)
       const reverse = intervalWithReverse.slice(-1);
       if (reverse !== 't' && reverse !== 'f') return false;
 
+      // Parse interval (everything except last character)
       const interval = parseFloat(intervalWithReverse.slice(0, -1));
       if (isNaN(interval) || interval < 0.001 || interval > 10) return false;
 
+      // Parse type and parts
       if (type === 's') {
         const parts = parseInt(partsStr);
         if (isNaN(parts) || parts < 2 || parts > 10) return false;
@@ -221,10 +180,6 @@ export const AudioProcessor = () => {
 
       setDecodeInterval(interval);
       setIsDecodeReversed(reverse === 't');
-      
-      // Store the audio data for decoding
-      setDecodedAudioData(data.audio);
-      
       return true;
     } catch (error) {
       return false;
@@ -295,12 +250,6 @@ export const AudioProcessor = () => {
 
       // Convert to WAV and create URL
       const wavBlob = audioBufferToWav(finalBuffer);
-      
-      // Generate encoding code with audio data
-      const encodingCode = await generateEncodingCode(wavBlob);
-      setEncodingResult(encodingCode);
-      
-      // Create URL for preview
       if (encodedAudioUrl) {
         URL.revokeObjectURL(encodedAudioUrl);
       }
@@ -316,14 +265,12 @@ export const AudioProcessor = () => {
   };
 
   const decodeAudio = async () => {
-    if (!decodedAudioData) return;
+    if (!file) return;
     setIsDecoding(true);
 
     try {
-      // Convert Base64 back to audio blob
-      const audioBlob = decodeFromBase64(decodedAudioData);
-      const arrayBuffer = await audioBlob.arrayBuffer();
       const audioContext = await initAudioContext();
+      const arrayBuffer = await file.arrayBuffer();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
       // First reverse the audio if it was reversed during encoding
@@ -509,7 +456,7 @@ export const AudioProcessor = () => {
                 </label>
               </div>
 
-              {encodingType !== 'none' && encodingResult && (
+              {encodingType !== 'none' && (
                 <div className="encoding-code" style={{ 
                   marginTop: '20px',
                   padding: '10px',
@@ -518,21 +465,13 @@ export const AudioProcessor = () => {
                   border: '1px solid #00ff9d'
                 }}>
                   <p style={{ margin: '0 0 5px 0', color: '#00ff9d' }}>Encoding Code:</p>
-                  <textarea
-                    readOnly
-                    value={encodingResult}
-                    style={{ 
-                      width: '100%',
-                      minHeight: '60px',
-                      fontSize: '0.9em',
-                      color: '#fff',
-                      backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                      padding: '5px 10px',
-                      borderRadius: '3px',
-                      border: 'none',
-                      resize: 'vertical'
-                    }}
-                  />
+                  <code style={{ 
+                    fontSize: '1.2em',
+                    color: '#fff',
+                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    padding: '5px 10px',
+                    borderRadius: '3px'
+                  }}>{generateEncodingCode()}</code>
                 </div>
               )}
 
