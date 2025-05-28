@@ -9,6 +9,8 @@ interface AudioSegment {
   data: Float32Array[];
 }
 
+const MAX_SEGMENT_SIZE = 1024 * 1024; // 1MB segments max
+
 export const AudioProcessor = () => {
   const [file, setFile] = useState<File | null>(null);
   const [encodedAudioUrl, setEncodedAudioUrl] = useState<string>('');
@@ -49,11 +51,18 @@ export const AudioProcessor = () => {
   const createAudioSegments = async (audioBuffer: AudioBuffer, segmentDuration: number): Promise<AudioSegment[]> => {
     const segments: AudioSegment[] = [];
     const numberOfSegments = Math.ceil(audioBuffer.duration / segmentDuration);
+    const maxSamplesPerSegment = Math.min(
+      Math.floor(segmentDuration * audioBuffer.sampleRate),
+      MAX_SEGMENT_SIZE / audioBuffer.numberOfChannels
+    );
     
     for (let i = 0; i < numberOfSegments; i++) {
       const start = i * segmentDuration;
       const end = Math.min((i + 1) * segmentDuration, audioBuffer.duration);
-      const segmentLength = Math.floor((end - start) * audioBuffer.sampleRate);
+      const segmentLength = Math.min(
+        Math.floor((end - start) * audioBuffer.sampleRate),
+        maxSamplesPerSegment
+      );
       
       const channelData: Float32Array[] = [];
       for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
@@ -67,9 +76,46 @@ export const AudioProcessor = () => {
         end,
         data: channelData
       });
+
+      // Force garbage collection of unused data
+      if (i % 100 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
     }
     
     return segments;
+  };
+
+  const processInBatches = async (
+    segments: AudioSegment[],
+    audioContext: AudioContext,
+    numberOfChannels: number,
+    sampleRate: number,
+    batchSize: number = 50
+  ): Promise<AudioBuffer> => {
+    const totalLength = segments.reduce((sum, segment) => sum + segment.data[0].length, 0);
+    const resultBuffer = audioContext.createBuffer(numberOfChannels, totalLength, sampleRate);
+    
+    let writePosition = 0;
+    for (let i = 0; i < segments.length; i += batchSize) {
+      const batch = segments.slice(i, i + batchSize);
+      
+      for (const segment of batch) {
+        for (let channel = 0; channel < numberOfChannels; channel++) {
+          const channelData = resultBuffer.getChannelData(channel);
+          channelData.set(segment.data[channel], writePosition);
+        }
+        writePosition += segment.data[0].length;
+        
+        // Clear segment data after use
+        segment.data = [];
+      }
+      
+      // Allow other operations to process
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    
+    return resultBuffer;
   };
 
   const reverseAudioBuffer = (buffer: AudioBuffer): AudioBuffer => {
@@ -229,21 +275,17 @@ export const AudioProcessor = () => {
         reorderedSegments = [...odd, ...even];
       }
 
-      // Create new audio buffer with reordered segments
-      const encodedBuffer = audioContext.createBuffer(
+      // Process the reordered segments in batches
+      const encodedBuffer = await processInBatches(
+        reorderedSegments,
+        audioContext,
         audioBuffer.numberOfChannels,
-        audioBuffer.length,
         audioBuffer.sampleRate
       );
 
-      let writePosition = 0;
-      for (const segment of reorderedSegments) {
-        for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
-          const channelData = encodedBuffer.getChannelData(channel);
-          channelData.set(segment.data[channel], writePosition);
-        }
-        writePosition += segment.data[0].length;
-      }
+      // Clear original segments
+      segments.length = 0;
+      reorderedSegments.length = 0;
 
       // Apply reverse if needed
       const finalBuffer = isReversed ? reverseAudioBuffer(encodedBuffer) : encodedBuffer;
@@ -292,11 +334,8 @@ export const AudioProcessor = () => {
         
         // Calculate where each segment should go
         segments.forEach((segment, index) => {
-          // Calculate which part this segment belongs to and its position within that part
           const partIndex = index % decodeNumberOfParts;
           const positionInPart = Math.floor(index / decodeNumberOfParts);
-          
-          // Calculate the final position
           const finalPosition = partIndex * segmentsPerPart + positionInPart;
           if (finalPosition < totalSegments) {
             reorderedSegments[finalPosition] = segment;
@@ -331,21 +370,17 @@ export const AudioProcessor = () => {
         reorderedSegments = reorderedSegments.filter(Boolean);
       }
 
-      // Create new audio buffer with reordered segments
-      const decodedBuffer = audioContext.createBuffer(
+      // Process the reordered segments in batches
+      const decodedBuffer = await processInBatches(
+        reorderedSegments,
+        audioContext,
         workingBuffer.numberOfChannels,
-        workingBuffer.length,
         workingBuffer.sampleRate
       );
 
-      let writePosition = 0;
-      for (const segment of reorderedSegments) {
-        for (let channel = 0; channel < workingBuffer.numberOfChannels; channel++) {
-          const channelData = decodedBuffer.getChannelData(channel);
-          channelData.set(segment.data[channel], writePosition);
-        }
-        writePosition += segment.data[0].length;
-      }
+      // Clear segments from memory
+      segments.length = 0;
+      reorderedSegments.length = 0;
 
       // Convert to WAV and create URL
       const wavBlob = audioBufferToWav(decodedBuffer);
