@@ -27,8 +27,6 @@ export const AudioProcessor = () => {
   const [isDecoding, setIsDecoding] = useState(false);
   const [decodeInputCode, setDecodeInputCode] = useState<string>('');
   const [isValidCode, setIsValidCode] = useState<boolean>(true);
-  const [decodedAudioData, setDecodedAudioData] = useState<string | null>(null);
-  const [encodingResult, setEncodingResult] = useState<string>('');
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -544,14 +542,16 @@ export const AudioProcessor = () => {
                   onChange={(e) => setDecodeInputCode(e.target.value)}
                   placeholder="e.g. sb5b0.2bt"
                   style={{
-                    width: '100%',
+                    width: '80%',
                     padding: '10px',
                     borderRadius: '5px',
                     border: `1px solid ${isValidCode ? '#bf00ff' : '#ff0000'}`,
                     backgroundColor: 'rgba(0, 0, 0, 0.2)',
                     color: '#fff',
                     fontSize: '1.1em',
-                    fontFamily: 'monospace'
+                    fontFamily: 'monospace',
+                    display: 'block',
+                    margin: '0 auto'
                   }}
                 />
                 {!isValidCode && decodeInputCode && (
