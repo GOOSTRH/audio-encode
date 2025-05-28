@@ -11,6 +11,7 @@ interface AudioSegment {
 
 const MAX_SEGMENT_SIZE = 1024 * 1024; // 1MB segments max
 
+// Audio Processing Component - Updated version
 export const AudioProcessor = () => {
   const [file, setFile] = useState<File | null>(null);
   const [encodedAudioUrl, setEncodedAudioUrl] = useState<string>('');
